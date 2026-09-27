@@ -46,6 +46,8 @@ class cmd {
     public $value = '';
     public $configuration = array();
     public $display = array();
+    public $template = array();
+    public $current = '';          /* dernière valeur publiée, pour execCmd() */
 
     public static function reset() { self::$table = array(); }
 
@@ -73,6 +75,8 @@ class cmd {
     public function setValue($_v) { $this->value = $_v; return $this; }
     public function setConfiguration($_k, $_v) { $this->configuration[$_k] = $_v; return $this; }
     public function setDisplay($_k, $_v) { $this->display[$_k] = $_v; return $this; }
+    public function setTemplate($_k, $_v) { $this->template[$_k] = $_v; return $this; }
+    public function execCmd() { return $this->current; }
 
     /* La contrainte d'unicité (eqLogic_id, name) de la vraie table est
      * reproduite : un doublon lève, comme DB::save() le ferait. */
@@ -123,8 +127,13 @@ class eqLogic {
         }
         return null;
     }
+    public $events = 0;
     public function checkAndUpdateCmd($_cmd, $_value, $_when = null) {
         $this->published[is_object($_cmd) ? $_cmd->getLogicalId() : $_cmd] = $_value;
+        if (is_object($_cmd)) {
+            $_cmd->current = $_value;
+        }
+        $this->events++;
     }
     /* Publiques dans eqLogic : les redéclarer en privé dans le plugin serait
      * une erreur fatale au chargement de la classe. */
@@ -141,5 +150,8 @@ class eqLogic {
     public function setEqType_name($_v) {}
     public function save($_direct = false) { $this->saved++; }
     public static function byType($_type, $_onlyEnable = false) { return array(); }
+    /* Rend l'équipement enregistré par le jeu d'essai, comme la base. */
+    public static $saved_eqs = array();
+    public static function byId($_id) { return isset(self::$saved_eqs[$_id]) ? self::$saved_eqs[$_id] : null; }
     public static function byLogicalId($_logicalId, $_eqType, $_multiple = false) { return null; }
 }

@@ -10,7 +10,7 @@ Tuya 3.3), sans cloud ni compte.
 - **Commandes** : marche/arrêt, consigne (16–31 °C), température, mode (auto,
   froid, déshumidification, chauffage, ventilation), ventilation de silence à
   turbo, balayages vertical, horizontal et 3D, ECO, nuit, affichage, santé,
-  auto-nettoyage, hors-gel 8 °C, chauffage d'appoint, minuterie, consommation,
+  auto-nettoyage, hors-gel 8 °C, chauffage d’appoint, minuterie, consommation,
   codes défaut décodés, et un envoi de DP bruts pour les scénarios.
 - **Particularités Airton respectées** : valeurs de mode propres à Airton
   (`heat`, `fan`), et marche + mode envoyés dans une seule trame quand on

@@ -49,7 +49,8 @@ et continue de fonctionner.
 1. Installez et activez le plugin. Aucune dépendance n'est à installer.
 2. Dans la page du plugin, cliquez sur **Rechercher sur le réseau**. Les
    appareils Tuya s'annoncent toutes les quelques secondes ; les Airton sont
-   signalés par une étiquette.
+   signalés par une étiquette. Certains appareils cessent de s'annoncer tant
+   qu'un autre système leur est connecté : utilisez alors **Ajouter**.
 3. Choisissez la clim, donnez-lui un nom, collez sa clé locale. Le plugin
    essaie la connexion avant de créer l'équipement : une clé fausse est
    signalée tout de suite.
@@ -66,29 +67,51 @@ Jeedom en moins d'une seconde. Le démon relit aussi l'état complet toutes les
 cinq minutes, par sécurité.
 
 Les ordres de Jeedom passent par le démon, qui tient la connexion. Démon
-arrêté, le plugin relève la clim une fois par minute par le cron, et chaque
-ordre ouvre une connexion courte.
+arrêté, le plugin relève la clim une fois par minute par le cron (une minute
+sur cinq après trois échecs d'affilée), et chaque ordre ouvre une connexion
+courte.
 
 ## Commandes
 
 Une commande n'est créée que pour les fonctions que la clim publie réellement.
-Les principales :
+Sur la tuile, chaque réglage n'apparaît qu'une fois : les interrupteurs
+(Marche/Arrêt, ECO, Nuit, Affichage) ne montrent que le bouton utile, le
+curseur et les listes affichent l'état courant. Les infos correspondantes
+(« État », « État consigne », « État mode »…) restent disponibles, cachées,
+pour les scénarios et l'historique.
 
 | Commande | Rôle |
 |---|---|
-| Etat, Allumer, Eteindre | Marche / arrêt. |
-| Consigne, Régler la consigne | 16 à 31 °C, par degré. |
+| Marche, Arrêt, État | Marche / arrêt. |
 | Température | Température ambiante mesurée par la clim. |
-| Mode, Choisir le mode | Auto, Froid, Déshumidification, Chauffage, Ventilation. |
-| Ventilation, Choisir la ventilation | Auto, Silence, Basse… Haute, Turbo. |
-| Balayage vertical / horizontal / 3D | Positions fixes ou balayage. |
-| ECO, Nuit, Affichage, Santé, Auto-nettoyage, Hors-gel 8 °C, Chauffage d'appoint, Séchage | Interrupteurs. |
-| Minuterie, Minuterie restante | Arrêt programmé, de 1 à 24 heures. |
-| Consommation, Durée d'utilisation | Compteurs de la clim. |
+| Consigne, État consigne | 16 à 31 °C, par degré. |
+| Mode, État mode, Mode effectif | Voir les valeurs ci-dessous. « Mode effectif » dit ce que fait la clim en mode Auto. |
+| Ventilation, État ventilation | Voir les valeurs ci-dessous. |
+| Balayage vertical, Balayage horizontal | Positions fixes ou balayage. |
+| ECO, Nuit, Affichage, Balayage 3D, Santé (ioniseur), Auto-nettoyage, Hors-gel 8 °C, Chauffage d’appoint, Séchage anti-moisissure | Interrupteurs (« … On » / « … Off » et l'info d'état). |
+| Balayage, État balayage | Ancien réglage de balayage (DP 15), en doublon des deux précédents. |
+| Minuterie, État minuterie, Minuterie restante | Arrêt programmé, de 1 à 24 heures. |
+| Consommation, Durée d’utilisation | Compteurs de la clim. |
 | Défaut, Codes défaut | Codes de panne décodés (E1, P0…), à rapprocher de la notice. |
+| Unité, Type | °C ou °F ; froid seul ou réversible, tel que la clim le déclare. En lecture seule. |
 | En ligne | La clim répond. |
 | Rafraîchir | Relit tout l'état. |
 | Envoyer des DP | Envoi brut pour les scénarios, voir plus bas. |
+
+### Valeurs à utiliser dans les scénarios
+
+Les infos de mode, de ventilation et de balayage portent la valeur brute de la
+clim, stable, et non le libellé affiché. Dans un scénario, on teste donc
+`#[Salon][Climatisation][État mode]# == "cold"`, pas `"Froid"`.
+
+| Réglage | Valeurs |
+|---|---|
+| Mode | `auto` Auto, `cold` Froid, `wet` Déshumidification, `heat` Chauffage, `fan` Ventilation |
+| Ventilation | `auto`, `mute` Silence, `low`, `low_mid`, `mid`, `mid_high`, `high`, `turbo` |
+| Balayage vertical | `off`, `15` Balayage, `1` (haut) à `5` (bas) |
+| Balayage horizontal | `off`, `same` Même sens, `opposite` Sens opposés |
+| Balayage (DP 15) | `off`, `un_down`, `left_right`, `all` |
+| Minuterie | `0` (aucune) à `24` heures |
 
 ### Règles propres aux Airton
 
@@ -99,6 +122,8 @@ Les principales :
   modes.
 - La commande **Type** indique ce que la clim déclare (froid seul ou
   réversible). Le mode Chauffage reste proposé dans tous les cas.
+- **L'unité (°C / °F) n'est pas réglable depuis Jeedom** : en °F, la consigne
+  changerait d'échelle. Laissez la clim en °C.
 
 ### Envoyer des DP
 
@@ -118,10 +143,15 @@ ventilation auto. Les numéros et valeurs sont ceux de l'onglet **Diagnostic**.
 L'onglet **Diagnostic** de l'équipement montre l'état de la connexion et les
 derniers DP reçus, en valeurs brutes. En cas de souci :
 
-- **« connexion refusée » ou connexion fermée aussitôt** : un autre client tient
-  la clim (voir *Une seule connexion à la fois*), ou l'adresse IP a changé.
+- **« Connexion fermée par l'appareil », « fermée par la clim » ou « connexion
+  refusée »** : un autre client tient la clim (voir *Une seule connexion à la
+  fois*), ou l'adresse IP a changé.
+- **« Connexion impossible » ou « délai de connexion dépassé »** : la clim est
+  hors tension, hors Wi-Fi, ou son adresse IP a changé.
 - **« clé locale probablement fausse »** : la clim a été réappairée ; récupérez
   la nouvelle clé.
+- **« L'appareil a refusé la commande »** : la clim a rejeté la valeur envoyée
+  (souvent un DP ou une valeur inconnus, avec « Envoyer des DP »).
 - Journal du démon : `airtonbed`. Journal du plugin : `airtonbe`. Passez-les
   en niveau *debug* pour voir chaque trame reçue et chaque ordre envoyé.
 

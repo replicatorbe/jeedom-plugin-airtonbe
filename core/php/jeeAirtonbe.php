@@ -24,7 +24,12 @@
 
 require_once __DIR__ . '/../../../../core/php/core.inc.php';
 
-if (!jeedom::apiAccess(init('apikey'), 'airtonbe')) {
+/* La seule clé du plugin : jeedom::apiAccess() accepterait aussi celle de
+ * n'importe quel utilisateur, qui obtiendrait ici les clés locales des
+ * climatiseurs. apiAccess() reste appelé pour son contrôle d'origine (accès
+ * du plugin limité à localhost). */
+if (!is_string(init('apikey')) || !hash_equals(jeedom::getApiKey('airtonbe'), init('apikey'))
+    || !jeedom::apiAccess(init('apikey'), 'airtonbe')) {
     http_response_code(401);
     echo 'Not authorized';
     die();

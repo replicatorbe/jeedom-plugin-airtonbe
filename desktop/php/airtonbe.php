@@ -168,11 +168,12 @@ $eqLogics = eqLogic::byType($plugin->getId());
 								<label class="col-sm-3 control-label">{{Clé locale}}</label>
 								<div class="col-sm-5">
 									<div class="input-group">
-										<input type="password" class="eqLogicAttr form-control roundedLeft" data-l1key="configuration" data-l2key="local_key" id="in_airtonbeKey" autocomplete="new-password" maxlength="16">
+										<input type="password" class="eqLogicAttr form-control roundedLeft" data-l1key="configuration" data-l2key="local_key" id="in_airtonbeKey" autocomplete="new-password">
 										<span class="input-group-btn">
 											<a class="btn btn-default roundedRight" id="bt_airtonbeShowKey" title="{{Afficher}}"><i class="fas fa-eye"></i></a>
 										</span>
 									</div>
+									<span class="text-danger" id="span_airtonbeKeyProblem" style="display:none;"></span>
 								</div>
 								<div class="col-sm-4">
 									<span class="help-block" style="margin:0;">{{« local_key », 16 caractères. Elle change si la clim est réappairée dans l'appli.}}</span>
@@ -189,7 +190,7 @@ $eqLogics = eqLogic::byType($plugin->getId());
 							<div class="form-group">
 								<label class="col-sm-3 control-label">{{Fonctions publiées}}</label>
 								<div class="col-sm-9">
-									<span class="eqLogicAttr" data-l1key="configuration" data-l2key="dps_seen"></span>
+									<span id="span_airtonbeSeen"></span>
 								</div>
 							</div>
 							<div class="form-group">

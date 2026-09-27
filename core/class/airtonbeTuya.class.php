@@ -191,6 +191,11 @@ class airtonbeTuya {
         return $data;
     }
 
+    /* Charge que decode() n'a pas su lire. */
+    public static function unreadable($_data) {
+        return is_string($_data) && $_data !== '' && $_data[0] === '!';
+    }
+
     /* ============================================================ COMMANDES */
 
     public static function queryData($_devId) {
@@ -260,24 +265,42 @@ class airtonbeTuya {
                 if (!$f['crc_ok']) {
                     continue;
                 }
+                /* Un refus arrive souvent en clair (« data format error ») :
+                 * le retcode se lit avant de conclure à une clé fausse. */
+                if ($f['retcode'] && $f['cmd'] === $_cmd) {
+                    throw new Exception('L\'appareil a refusé la commande (code ' . $f['retcode'] . ').');
+                }
+                if ($f['retcode']) {
+                    continue;
+                }
                 $data = self::decode($f['payload'], $_key);
-                if (is_string($data) && $data !== '' && $data[0] === '!') {
-                    throw new Exception('Réponse illisible : la clé locale est probablement fausse (' . substr($data, 1, 60) . ').');
+                if (self::unreadable($data)) {
+                    if ($f['cmd'] === self::DP_QUERY || $f['cmd'] === self::STATUS) {
+                        throw new Exception('Réponse illisible : la clé locale est probablement fausse.');
+                    }
+                    $data = null;
                 }
                 if ($f['cmd'] === self::STATUS && is_array($data) && isset($data['dps']) && is_array($data['dps'])) {
                     $_dps = $data['dps'] + $_dps;
                 }
                 if ($f['cmd'] === $_cmd) {
-                    if ($f['retcode']) {
-                        throw new Exception('L\'appareil a refusé la commande (code ' . $f['retcode'] . ').');
-                    }
                     return $data;
                 }
             }
             $r = array($_sock);
             $w = $e = null;
             $left = $deadline - microtime(true);
-            if ($left <= 0 || !@stream_select($r, $w, $e, 0, (int) ($left * 1000000))) {
+            if ($left <= 0) {
+                continue;
+            }
+            $n = @stream_select($r, $w, $e, 0, (int) ($left * 1000000));
+            if ($n === false) {
+                /* Interrompu par un signal : sans pause, la boucle tournerait
+                 * à vide jusqu'à l'échéance. */
+                usleep(50000);
+                continue;
+            }
+            if ($n === 0) {
                 continue;
             }
             $chunk = @fread($_sock, 8192);
@@ -328,7 +351,12 @@ class airtonbeTuya {
         while (($left = $end - microtime(true)) > 0) {
             $r = $socks;
             $w = $e = null;
-            if (!@socket_select($r, $w, $e, 0, (int) ($left * 1000000))) {
+            $n = @socket_select($r, $w, $e, 0, (int) ($left * 1000000));
+            if ($n === false) {
+                usleep(50000);
+                continue;
+            }
+            if ($n === 0) {
                 continue;
             }
             foreach ($r as $s) {

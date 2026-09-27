@@ -158,6 +158,7 @@ section('Commandes');
 cmd::reset();
 $eq = new airtonbe();
 $eq->id = 12;
+eqLogic::$saved_eqs[12] = $eq;
 $eq->createCommands();
 $before = count(cmd::$table);
 check('avant le premier relevé : commandes de base', $eq->getCmd('action', 'mode_set') !== null && $eq->getCmd('action', 'eco_on') === null, true);
@@ -182,5 +183,33 @@ check('DP apparu plus tard : commande créée', $eq->getCmd('action', 'timer_set
 $eq->ingest($state, true);
 check('relevé complet : DP 21 (poussé seulement) gardé', $eq->getCache('dps')['21'], '3');
 
+section('Tuile');
+$visible = array();
+foreach (cmd::$table as $c) {
+    if ($c->isVisible) { $visible[$c->order] = $c->name; }
+}
+ksort($visible);
+check('commandes visibles, dans l\'ordre', array_values($visible), array('Marche', 'Arrêt', 'Température', 'Consigne', 'Mode', 'Ventilation',
+    'Balayage vertical', 'Balayage horizontal', 'ECO On', 'ECO Off', 'Nuit On', 'Nuit Off', 'Affichage On', 'Affichage Off', 'Rafraîchir'));
+check('interrupteur : widget binarySwitch', $eq->getCmd('action', 'power_on')->template['dashboard'], 'core::binarySwitch');
+check('info d\'une valeur réglable cachée', $eq->getCmd('info', 'target')->isVisible, 0);
+check('ordre fixe : minuterie après les interrupteurs', $eq->getCmd('info', 'timer')->order > $eq->getCmd('action', 'display_off')->order, true);
+check('unité en lecture seule', $eq->getCmd('action', 'unit_set'), null);
+check('apostrophe gardée dans les noms', $eq->getCmd('info', 'aux_heat')->name, 'Chauffage d’appoint');
+
+section('Événements');
+$before = $eq->events;
+$eq->ingest($state, true);
+$eq->ingest($state, true);
+$repeat = $eq->events - $before;
+$eq->ingest(array('20' => 2));
+check('codes défaut vides : pas republiés à chaque relevé', array_key_exists('fault_codes', $eq->published) && $repeat === 2 * (count(airtonbe::valuesFromDps($state)) - 1), true);
+check('code défaut apparu : publié', $eq->published['fault_codes'], 'E4');
+check('valeur non numérique ignorée', array_key_exists('temperature', airtonbe::valuesFromDps(array('3' => 'n/a'))), false);
+
 printf("\n%d réussi(s), %d échec(s)\n", $passed, $failed);
-exit($failed === 0 ? 0 : 1);
+
+/* Le démon, de bout en bout, dans un processus à part (code 2 : ignoré, faute
+ * de pouvoir écouter sur 127.0.0.2:6668). */
+passthru(escapeshellarg(PHP_BINARY) . ' ' . escapeshellarg(__DIR__ . '/daemon.php'), $rc);
+exit(($failed === 0 && ($rc === 0 || $rc === 2)) ? 0 : 1);

@@ -50,66 +50,76 @@ class airtonbe extends eqLogic {
      * fois dans le journal, puis n'est plus relevé qu'une minute sur cinq. */
     const OFFLINE_AFTER = 3;
 
-    const CRON_BUDGET = 40;
+    /* Le cron de tous les plugins passe dans un seul processus : le relevé de
+     * secours ne doit pas y faire attendre les autres. */
+    const CRON_BUDGET = 15;
+    const CRON_TIMEOUT = 3;
 
     const TARGET_MIN = 16;
     const TARGET_MAX = 31;
 
     /*
-     * DP des Airton. key : base des identifiants logiques ; write : la clim
-     * accepte l'écriture ; scale : diviseur de la valeur brute.
+     * DP des Airton.
+     *   key   : base des identifiants logiques ;
+     *   order : rang sur la tuile, fixe, pour qu'un DP apparu tard (la
+     *           minuterie ne remonte qu'à son changement) ne décale rien ;
+     *   name  : nom de l'info ; set : nom de l'action d'une valeur réglable ;
+     *   write : la clim accepte l'écriture ; scale : diviseur de la valeur brute.
+     * Les noms évitent l'apostrophe droite, que le coeur retire des noms de
+     * commande.
      */
     const PROFILE = array(
-        1   => array('key' => 'power', 'name' => 'Etat', 'type' => 'bool', 'write' => true, 'visible' => 1, 'generic' => 'ENERGY_STATE',
-                     'on' => 'Allumer', 'off' => 'Eteindre', 'on_generic' => 'ENERGY_ON', 'off_generic' => 'ENERGY_OFF'),
-        2   => array('key' => 'target', 'name' => 'Consigne', 'type' => 'value', 'write' => true, 'scale' => 10, 'unit' => '°C',
-                     'min' => self::TARGET_MIN, 'max' => self::TARGET_MAX, 'visible' => 1, 'hist' => 1,
-                     'generic' => 'THERMOSTAT_SETPOINT', 'set_generic' => 'THERMOSTAT_SET_SETPOINT', 'set' => 'Régler la consigne'),
-        3   => array('key' => 'temperature', 'name' => 'Température', 'type' => 'value', 'scale' => 10, 'unit' => '°C',
+        1   => array('key' => 'power', 'order' => 1, 'name' => 'État', 'type' => 'bool', 'write' => true, 'visible' => 1, 'generic' => 'ENERGY_STATE',
+                     'on' => 'Marche', 'off' => 'Arrêt', 'on_generic' => 'ENERGY_ON', 'off_generic' => 'ENERGY_OFF'),
+        3   => array('key' => 'temperature', 'order' => 2, 'name' => 'Température', 'type' => 'value', 'scale' => 10, 'unit' => '°C',
                      'visible' => 1, 'hist' => 1, 'generic' => 'THERMOSTAT_TEMPERATURE'),
-        4   => array('key' => 'mode', 'name' => 'Mode', 'type' => 'enum', 'write' => true, 'visible' => 1,
+        2   => array('key' => 'target', 'order' => 3, 'name' => 'État consigne', 'type' => 'value', 'write' => true, 'scale' => 10, 'unit' => '°C',
+                     'min' => self::TARGET_MIN, 'max' => self::TARGET_MAX, 'visible' => 1, 'hist' => 1,
+                     'generic' => 'THERMOSTAT_SETPOINT', 'set_generic' => 'THERMOSTAT_SET_SETPOINT', 'set' => 'Consigne'),
+        4   => array('key' => 'mode', 'order' => 4, 'name' => 'État mode', 'type' => 'enum', 'write' => true, 'visible' => 1,
                      'values' => array('auto' => 'Auto', 'cold' => 'Froid', 'wet' => 'Déshumidification', 'heat' => 'Chauffage', 'fan' => 'Ventilation'),
-                     'generic' => 'THERMOSTAT_MODE', 'set_generic' => 'THERMOSTAT_SET_MODE', 'set' => 'Choisir le mode'),
-        5   => array('key' => 'fan', 'name' => 'Ventilation', 'type' => 'enum', 'write' => true, 'visible' => 1,
+                     'generic' => 'THERMOSTAT_MODE', 'set_generic' => 'THERMOSTAT_SET_MODE', 'set' => 'Mode'),
+        5   => array('key' => 'fan', 'order' => 5, 'name' => 'État ventilation', 'type' => 'enum', 'write' => true, 'visible' => 1,
                      'values' => array('auto' => 'Auto', 'mute' => 'Silence', 'low' => 'Basse', 'low_mid' => 'Moyenne-basse', 'mid' => 'Moyenne',
                                        'mid_high' => 'Moyenne-haute', 'high' => 'Haute', 'turbo' => 'Turbo'),
-                     'set' => 'Choisir la ventilation'),
-        8   => array('key' => 'eco', 'name' => 'ECO', 'type' => 'bool', 'write' => true, 'visible' => 1),
-        9   => array('key' => 'drying', 'name' => 'Séchage anti-moisissure', 'type' => 'bool', 'write' => true),
-        12  => array('key' => 'aux_heat', 'name' => 'Chauffage d\'appoint', 'type' => 'bool', 'write' => true),
-        13  => array('key' => 'display', 'name' => 'Affichage', 'type' => 'bool', 'write' => true, 'visible' => 1),
-        15  => array('key' => 'swing', 'name' => 'Balayage', 'type' => 'enum', 'write' => true,
-                     'values' => array('off' => 'Arrêt', 'un_down' => 'Haut-bas', 'left_right' => 'Gauche-droite', 'all' => 'Complet'),
-                     'set' => 'Choisir le balayage'),
-        20  => array('key' => 'fault', 'type' => 'bitmap',
-                     'bits' => array('CL', 'E4', 'E5', 'H6', 'H9', 'HE', 'L0', 'L1', 'L2', 'L3', 'L6', 'L7', 'L8', 'L9', 'LA', 'Ld',
-                                     'P0', 'P1', 'P6', 'P8', 'PA', 'PC', 'Pd', 'PE')),
-        21  => array('key' => 'timer', 'name' => 'Minuterie', 'type' => 'enum', 'write' => true, 'values' => 'timer', 'set' => 'Régler la minuterie'),
-        22  => array('key' => 'timer_left', 'name' => 'Minuterie restante', 'type' => 'value', 'unit' => 'min'),
-        101 => array('key' => 'usage_reports', 'name' => 'Remontées de durée', 'type' => 'value'),
-        102 => array('key' => 'usage_time', 'name' => 'Durée d\'utilisation', 'type' => 'value', 'unit' => 'h'),
-        103 => array('key' => 'energy', 'name' => 'Consommation', 'type' => 'value', 'scale' => 10, 'unit' => 'kWh', 'hist' => 1,
-                     'generic' => 'CONSUMPTION'),
-        104 => array('key' => 'energy_reports', 'name' => 'Remontées de consommation', 'type' => 'value'),
-        105 => array('key' => 'unit', 'name' => 'Unité', 'type' => 'enum', 'write' => true, 'values' => array('c' => '°C', 'f' => '°F'),
-                     'set' => 'Choisir l\'unité'),
-        106 => array('key' => 'swing_h', 'name' => 'Balayage horizontal', 'type' => 'enum', 'write' => true, 'visible' => 1,
-                     'values' => array('off' => 'Arrêt', 'same' => 'Même sens', 'opposite' => 'Sens opposés'),
-                     'set' => 'Choisir le balayage horizontal'),
-        107 => array('key' => 'swing_v', 'name' => 'Balayage vertical', 'type' => 'enum', 'write' => true, 'visible' => 1,
+                     'set' => 'Ventilation'),
+        107 => array('key' => 'swing_v', 'order' => 6, 'name' => 'État balayage vertical', 'type' => 'enum', 'write' => true, 'visible' => 1,
                      'values' => array('off' => 'Arrêt', '15' => 'Balayage', '1' => 'Position 1 (haut)', '2' => 'Position 2', '3' => 'Position 3',
                                        '4' => 'Position 4', '5' => 'Position 5 (bas)'),
-                     'set' => 'Choisir le balayage vertical'),
-        108 => array('key' => 'swing_3d', 'name' => 'Balayage 3D', 'type' => 'bool', 'write' => true),
-        109 => array('key' => 'sleep', 'name' => 'Nuit', 'type' => 'bool', 'write' => true, 'visible' => 1),
-        110 => array('key' => 'health', 'name' => 'Santé (ioniseur)', 'type' => 'bool', 'write' => true),
-        111 => array('key' => 'clean', 'name' => 'Auto-nettoyage', 'type' => 'bool', 'write' => true),
-        112 => array('key' => 'ac_type', 'name' => 'Type', 'type' => 'enum', 'values' => array('cold' => 'Froid seul', 'cold_heat' => 'Réversible')),
-        113 => array('key' => 'fault', 'type' => 'bitmap', 'shift' => 24,
-                     'bits' => array('PF', 'SC', 'U0', 'U1', 'U2', 'U3', 'U4', 'U5', 'U6', 'U7', 'U8', 'U9', 'UC', 'Ud', 'E1', 'E2')),
-        114 => array('key' => 'current_mode', 'name' => 'Mode effectif', 'type' => 'enum',
+                     'set' => 'Balayage vertical'),
+        106 => array('key' => 'swing_h', 'order' => 7, 'name' => 'État balayage horizontal', 'type' => 'enum', 'write' => true, 'visible' => 1,
+                     'values' => array('off' => 'Arrêt', 'same' => 'Même sens', 'opposite' => 'Sens opposés'),
+                     'set' => 'Balayage horizontal'),
+        8   => array('key' => 'eco', 'order' => 8, 'name' => 'ECO', 'type' => 'bool', 'write' => true, 'visible' => 1),
+        109 => array('key' => 'sleep', 'order' => 9, 'name' => 'Nuit', 'type' => 'bool', 'write' => true, 'visible' => 1),
+        13  => array('key' => 'display', 'order' => 10, 'name' => 'Affichage', 'type' => 'bool', 'write' => true, 'visible' => 1),
+        108 => array('key' => 'swing_3d', 'order' => 11, 'name' => 'Balayage 3D', 'type' => 'bool', 'write' => true),
+        110 => array('key' => 'health', 'order' => 12, 'name' => 'Santé (ioniseur)', 'type' => 'bool', 'write' => true),
+        111 => array('key' => 'clean', 'order' => 13, 'name' => 'Auto-nettoyage', 'type' => 'bool', 'write' => true),
+        115 => array('key' => 'frost', 'order' => 14, 'name' => 'Hors-gel 8 °C', 'type' => 'bool', 'write' => true),
+        12  => array('key' => 'aux_heat', 'order' => 15, 'name' => 'Chauffage d’appoint', 'type' => 'bool', 'write' => true),
+        9   => array('key' => 'drying', 'order' => 16, 'name' => 'Séchage anti-moisissure', 'type' => 'bool', 'write' => true),
+        15  => array('key' => 'swing', 'order' => 17, 'name' => 'État balayage', 'type' => 'enum', 'write' => true,
+                     'values' => array('off' => 'Arrêt', 'un_down' => 'Haut-bas', 'left_right' => 'Gauche-droite', 'all' => 'Complet'),
+                     'set' => 'Balayage'),
+        21  => array('key' => 'timer', 'order' => 18, 'name' => 'État minuterie', 'type' => 'enum', 'write' => true, 'values' => 'timer', 'set' => 'Minuterie'),
+        22  => array('key' => 'timer_left', 'order' => 19, 'name' => 'Minuterie restante', 'type' => 'value', 'unit' => 'min'),
+        114 => array('key' => 'current_mode', 'order' => 20, 'name' => 'Mode effectif', 'type' => 'enum',
                      'values' => array('cold' => 'Froid', 'wet' => 'Déshumidification', 'heat' => 'Chauffage', 'fan' => 'Ventilation')),
-        115 => array('key' => 'frost', 'name' => 'Hors-gel 8 °C', 'type' => 'bool', 'write' => true),
+        20  => array('key' => 'fault', 'order' => 21, 'type' => 'bitmap',
+                     'bits' => array('CL', 'E4', 'E5', 'H6', 'H9', 'HE', 'L0', 'L1', 'L2', 'L3', 'L6', 'L7', 'L8', 'L9', 'LA', 'Ld',
+                                     'P0', 'P1', 'P6', 'P8', 'PA', 'PC', 'Pd', 'PE')),
+        113 => array('key' => 'fault', 'order' => 21, 'type' => 'bitmap',
+                     'bits' => array('PF', 'SC', 'U0', 'U1', 'U2', 'U3', 'U4', 'U5', 'U6', 'U7', 'U8', 'U9', 'UC', 'Ud', 'E1', 'E2')),
+        103 => array('key' => 'energy', 'order' => 22, 'name' => 'Consommation', 'type' => 'value', 'scale' => 10, 'unit' => 'kWh', 'hist' => 1,
+                     'generic' => 'CONSUMPTION'),
+        102 => array('key' => 'usage_time', 'order' => 23, 'name' => 'Durée d’utilisation', 'type' => 'value', 'unit' => 'h'),
+        /* L'unité reste en lecture : en °F, la consigne changerait d'échelle
+         * et le curseur 16–31 n'aurait plus de sens. */
+        105 => array('key' => 'unit', 'order' => 24, 'name' => 'Unité', 'type' => 'enum', 'values' => array('c' => '°C', 'f' => '°F')),
+        112 => array('key' => 'ac_type', 'order' => 25, 'name' => 'Type', 'type' => 'enum', 'values' => array('cold' => 'Froid seul', 'cold_heat' => 'Réversible')),
+        101 => array('key' => 'usage_reports', 'order' => 26, 'name' => 'Remontées de durée', 'type' => 'value'),
+        104 => array('key' => 'energy_reports', 'order' => 27, 'name' => 'Remontées de consommation', 'type' => 'value'),
     );
 
     /* DP dont les commandes existent avant le premier relevé. */
@@ -137,7 +147,7 @@ class airtonbe extends eqLogic {
                 break;
             }
             try {
-                $eqLogic->pollDirect();
+                $eqLogic->pollDirect(self::CRON_TIMEOUT);
             } catch (Throwable $e) {
                 $eqLogic->noteFailure($e->getMessage());
             }
@@ -198,6 +208,7 @@ class airtonbe extends eqLogic {
         $cmd .= ' --pid ' . escapeshellarg(jeedom::getTmpFolder(__CLASS__) . '/deamon.pid');
         $cmd .= ' --stamp ' . escapeshellarg(self::stampFile());
         $cmd .= ' --port ' . (int) self::daemonPort();
+        cache::set('airtonbe::daemon_port', self::daemonPort());
         $cmd .= ' --loglevel ' . escapeshellarg(log::convertLogLevel(log::getLogLevel(__CLASS__)));
         $cmd .= ' --timezone ' . escapeshellarg(date_default_timezone_get());
 
@@ -276,6 +287,7 @@ class airtonbe extends eqLogic {
     /* État poussé par le démon : DP reçus, connexion ouverte ou perdue. */
     public function ingestDaemon($_data) {
         if (isset($_data['online'])) {
+            $this->setCache('daemon_link', (int) $_data['online'] === 1 ? time() : 0);
             if ((int) $_data['online'] === 1) {
                 $this->clearFailure();
             } else {
@@ -287,12 +299,15 @@ class airtonbe extends eqLogic {
         }
     }
 
-    /* Le démon dit à chaque relecture de configuration à quels appareils il
-     * est connecté ; la valeur vieillit avec lui. */
+    /* Connexion directe ouverte : le démon le signale aussitôt qu'elle
+     * s'ouvre ou tombe, et le redit à chaque relecture de configuration. */
     public function isLive() {
+        if ((int) $this->getCache('daemon_link', 0) === 0) {
+            return false;
+        }
         $live = cache::byKey('airtonbe::live')->getValue(array());
-        return is_array($live) && isset($live['at'], $live['eqs']) && time() - (int) $live['at'] < 150
-            && in_array((int) $this->getId(), (array) $live['eqs'], true);
+        /* Un démon qui ne donne plus signe de vie n'est plus connecté à rien. */
+        return is_array($live) && isset($live['at']) && time() - (int) $live['at'] < 150;
     }
 
     /* ======================================================== CYCLE DE VIE */
@@ -327,8 +342,10 @@ class airtonbe extends eqLogic {
         self::notifyDaemon();
     }
 
+    /* Appelée à chaque enregistrement de la configuration, même sans
+     * changement : on ne relance le démon que si son port a changé. */
     public static function postConfig_daemon_port($_value) {
-        if (self::deamon_info()['state'] == 'ok') {
+        if (self::deamon_info()['state'] == 'ok' && (int) cache::byKey('airtonbe::daemon_port')->getValue(0) !== self::daemonPort()) {
             self::deamon_start();
         }
     }
@@ -373,7 +390,10 @@ class airtonbe extends eqLogic {
         if (strlen($_key) !== 16) {
             throw new Exception(__('La clé locale doit faire exactement 16 caractères.', __FILE__));
         }
-        $dps = airtonbeTuya::exchange($_ip, $_gwId, $_key);
+        /* Un appareil que le démon tient déjà n'accepterait pas une seconde
+         * connexion : sa clé a fait ses preuves, l'état arrivera par le démon. */
+        $dps = (is_object($eqLogic) && $eqLogic->isLive() && $_key === $eqLogic->getConfiguration('local_key'))
+            ? null : airtonbeTuya::exchange($_ip, $_gwId, $_key);
         if (!is_object($eqLogic)) {
             $eqLogic = new airtonbe();
             $eqLogic->setEqType_name(__CLASS__);
@@ -381,7 +401,7 @@ class airtonbe extends eqLogic {
             $base = $name;
             /* Unicité (name, object_id) en base, tous plugins confondus :
              * l'équipement naît sans objet parent. */
-            for ($i = 2; count(eqLogic::byObjectNameEqLogicName(__('Aucun', __FILE__), $name)) > 0; $i++) {
+            for ($i = 2; self::nameTaken($name); $i++) {
                 $name = $base . ' ' . $i;
             }
             $eqLogic->setName($name);
@@ -393,24 +413,37 @@ class airtonbe extends eqLogic {
             $eqLogic->setConfiguration('product_key', $_productKey);
         }
         $eqLogic->save();
-        $eqLogic->ingest($dps, true);
+        if ($dps !== null) {
+            $eqLogic->ingest($dps, true);
+        }
         return $eqLogic;
+    }
+
+    /* Unicité (name, object_id) de la table, tous plugins confondus. Requête
+     * directe : eqLogic::byObjectNameEqLogicName() compare le nom d'objet à
+     * « Aucun » traduit, et rate le cas hors français. */
+    private static function nameTaken($_name) {
+        $row = DB::Prepare('SELECT COUNT(*) AS n FROM eqLogic WHERE name=:name AND object_id IS NULL', array('name' => $_name), DB::FETCH_TYPE_ROW);
+        return is_array($row) && (int) $row['n'] > 0;
     }
 
     /* =============================================================== RELEVÉ */
 
-    /* Relevé par une connexion courte. Démon actif, c'est lui qui relit : la
-     * clim n'accepterait pas une seconde connexion. */
+    /* Démon actif, c'est toujours lui qui relit : la clim n'accepterait pas
+     * une seconde connexion. On ne se connecte soi-même que s'il ne connaît
+     * pas encore l'appareil (configuration pas encore relue). */
     public function pollNow() {
-        if (self::deamon_info()['state'] == 'ok' && $this->isLive()) {
-            $this->daemonRequest(array('refresh' => 1));
+        if (self::deamon_info()['state'] == 'ok' && $this->daemonRequest(array('refresh' => 1))) {
             return;
         }
         $this->pollDirect();
     }
 
-    public function pollDirect() {
-        $dps = airtonbeTuya::exchange($this->getConfiguration('ip'), $this->getConfiguration('dev_id'), $this->getConfiguration('local_key'));
+    public function pollDirect($_timeout = 5) {
+        if (!$this->isConfigured()) {
+            throw new Exception(__('Climatiseur non configuré : adresse IP, identifiant et clé locale (16 caractères) sont nécessaires.', __FILE__));
+        }
+        $dps = airtonbeTuya::exchange($this->getConfiguration('ip'), $this->getConfiguration('dev_id'), $this->getConfiguration('local_key'), null, $_timeout);
         $this->clearFailure();
         $this->ingest($dps, true);
     }
@@ -439,11 +472,23 @@ class airtonbe extends eqLogic {
             $seen = array_values(array_unique(array_merge($seen, $new)));
             sort($seen);
             $this->setConfiguration('dps_seen', implode(',', $seen));
-            $this->save(true);
+            /* Écriture sur une copie fraîche : cet objet peut dater du début
+             * d'un cron, et réécrire toute sa ligne rendrait une adresse IP
+             * modifiée entre-temps. */
+            $fresh = self::byId($this->getId());
+            if (is_object($fresh)) {
+                $fresh->setConfiguration('dps_seen', implode(',', $seen));
+                $fresh->save(true);
+            }
             $this->createCommands();
         }
         foreach (self::valuesFromDps($_dps, $all) as $logicalId => $value) {
-            if ($logicalId === 'fault_codes' && $this->getCache('fault_codes', '') !== $value) {
+            if ($logicalId === 'fault_codes') {
+                /* Une valeur vide n'est jamais vue comme inchangée par le
+                 * coeur : elle relancerait un événement à chaque relevé. */
+                if ($this->getCache('fault_codes', null) === $value) {
+                    continue;
+                }
                 $this->setCache('fault_codes', $value);
                 if ($value !== '') {
                     log::add(__CLASS__, 'warning', $this->getHumanName() . ' : ' . __('code(s) défaut', __FILE__) . ' ' . $value);
@@ -478,6 +523,9 @@ class airtonbe extends eqLogic {
                     $values[$def['key']] = $raw ? 1 : 0;
                     break;
                 case 'value':
+                    if (!is_numeric($raw)) {
+                        break;
+                    }
                     $values[$def['key']] = isset($def['scale']) ? round($raw / $def['scale'], 1) : $raw;
                     break;
                 case 'enum':
@@ -529,41 +577,48 @@ class airtonbe extends eqLogic {
         return implode(';', $items);
     }
 
+    /*
+     * Sur la tuile, une valeur réglable n'apparaît qu'une fois : le curseur
+     * ou la liste affichent l'état de l'info liée, et un interrupteur
+     * (core::binarySwitch) ne montre que celle de ses deux commandes qui
+     * s'applique. L'info reste disponible pour les scénarios et l'historique.
+     */
     public function createCommands() {
         $dps = array_unique(array_merge(self::CORE_DPS, $this->seenDps()));
-        sort($dps);
-        $order = 0;
-        $this->addCmdIfMissing('online', 'En ligne', 'info', 'binary', array('order' => $order++));
+        $this->addCmdIfMissing('online', 'En ligne', 'info', 'binary', array('order' => 0));
         foreach ($dps as $dp) {
             if (!isset(self::PROFILE[$dp])) {
-                $this->addCmdIfMissing('dp_' . $dp, 'DP ' . $dp, 'info', 'string', array('order' => 200 + $dp));
+                $this->addCmdIfMissing('dp_' . $dp, 'DP ' . $dp, 'info', 'string', array('order' => 1000 + $dp));
                 continue;
             }
             $def = self::PROFILE[$dp];
             $key = $def['key'];
             $visible = isset($def['visible']) ? $def['visible'] : 0;
-            $base = 10 * $order++;
+            $base = 10 * $def['order'];
             if ($def['type'] === 'bitmap') {
                 $this->addCmdIfMissing('fault', 'Défaut', 'info', 'binary', array('order' => $base));
                 $this->addCmdIfMissing('fault_codes', 'Codes défaut', 'info', 'string', array('order' => $base + 1));
                 continue;
             }
+            $writable = !empty($def['write']);
             $subType = array('bool' => 'binary', 'value' => 'numeric', 'enum' => 'string')[$def['type']];
             $info = $this->addCmdIfMissing($key, $def['name'], 'info', $subType, array(
-                'order' => $base, 'isVisible' => ($def['type'] === 'enum' && !empty($def['write'])) ? 0 : $visible,
+                'order' => $base, 'isVisible' => $writable ? 0 : $visible,
                 'isHistorized' => isset($def['hist']) ? $def['hist'] : 0,
                 'unite' => isset($def['unit']) ? $def['unit'] : '', 'generic' => isset($def['generic']) ? $def['generic'] : '',
             ));
-            if (empty($def['write'])) {
+            if (!$writable) {
                 continue;
             }
             switch ($def['type']) {
                 case 'bool':
+                    /* Noms en « … On » / « … Off » (ou Marche / Arrêt) : c'est
+                     * ce que le widget interrupteur reconnaît. */
                     $this->addCmdIfMissing($key . '_on', isset($def['on']) ? $def['on'] : $def['name'] . ' On', 'action', 'other',
-                        array('order' => $base + 1, 'isVisible' => $visible, 'value' => $info,
+                        array('order' => $base + 1, 'isVisible' => $visible, 'value' => $info, 'template' => 'core::binarySwitch',
                               'generic' => isset($def['on_generic']) ? $def['on_generic'] : ''));
                     $this->addCmdIfMissing($key . '_off', isset($def['off']) ? $def['off'] : $def['name'] . ' Off', 'action', 'other',
-                        array('order' => $base + 2, 'isVisible' => $visible, 'value' => $info,
+                        array('order' => $base + 2, 'isVisible' => $visible, 'value' => $info, 'template' => 'core::binarySwitch',
                               'generic' => isset($def['off_generic']) ? $def['off_generic'] : ''));
                     break;
                 case 'value':
@@ -611,6 +666,10 @@ class airtonbe extends eqLogic {
         if (isset($_options['value']) && is_object($_options['value'])) {
             $cmd->setValue($_options['value']->getId());
         }
+        if (isset($_options['template'])) {
+            $cmd->setTemplate('dashboard', $_options['template']);
+            $cmd->setTemplate('mobile', $_options['template']);
+        }
         foreach (isset($_options['display']) ? $_options['display'] : array() as $key => $value) {
             $cmd->setDisplay($key, $value);
         }
@@ -635,9 +694,14 @@ class airtonbe extends eqLogic {
             return;
         }
         $cmd = $this->getCmd('info', $_logicalId);
-        if (is_object($cmd)) {
-            $this->checkAndUpdateCmd($cmd, $_value);
+        if (!is_object($cmd)) {
+            return;
         }
+        /* Le coeur ne voit jamais une valeur vide comme inchangée. */
+        if ($_value === '' && $cmd->execCmd() === '') {
+            return;
+        }
+        $this->checkAndUpdateCmd($cmd, $_value);
     }
 
     /* =============================================================== ORDRES */
@@ -724,11 +788,10 @@ class airtonbe extends eqLogic {
      * connexion courte. */
     public function sendDps($_dps) {
         if (!$this->isConfigured()) {
-            throw new Exception(__('Climatiseur non configuré : adresse IP, identifiant et clé locale sont nécessaires.', __FILE__));
+            throw new Exception(__('Climatiseur non configuré : adresse IP, identifiant et clé locale (16 caractères) sont nécessaires.', __FILE__));
         }
         log::add(__CLASS__, 'debug', $this->getHumanName() . ' → ' . airtonbeTuya::json(array('dps' => $_dps)));
-        if (self::deamon_info()['state'] == 'ok') {
-            $this->daemonRequest(array('dps' => $_dps));
+        if (self::deamon_info()['state'] == 'ok' && $this->daemonRequest(array('dps' => $_dps))) {
             return;
         }
         $dps = airtonbeTuya::exchange($this->getConfiguration('ip'), $this->getConfiguration('dev_id'),
@@ -737,17 +800,28 @@ class airtonbe extends eqLogic {
         $this->ingest($dps, true);
     }
 
-    /* Une requête au démon, sur sa socket locale : une ligne JSON, une ligne
+    /*
+     * Une requête au démon, sur sa socket locale : une ligne JSON, une ligne
      * de réponse. L'état qui en résulte revient par le chemin habituel des
-     * changements poussés. */
+     * changements poussés.
+     *
+     * Rend false quand le démon ne connaît pas encore l'appareil (il n'a pas
+     * relu sa configuration) : il n'a alors pas de connexion, l'appelant peut
+     * ouvrir la sienne.
+     *
+     * La requête porte une échéance : un démon occupé qui la lirait après
+     * l'abandon de Jeedom ne doit pas envoyer à la clim un ordre annoncé en
+     * échec.
+     */
     private function daemonRequest($_request) {
         $sock = @stream_socket_client('tcp://127.0.0.1:' . self::daemonPort(), $errno, $error, 3);
         if ($sock === false) {
             throw new Exception(__('Démon injoignable :', __FILE__) . ' ' . $error);
         }
-        stream_set_timeout($sock, 8);
+        stream_set_timeout($sock, 10);
         $_request['apikey'] = jeedom::getApiKey(__CLASS__);
         $_request['eq'] = (int) $this->getId();
+        $_request['until'] = microtime(true) + 3;
         fwrite($sock, json_encode($_request) . "\n");
         $line = fgets($sock);
         fclose($sock);
@@ -755,9 +829,13 @@ class airtonbe extends eqLogic {
         if (!is_array($reply)) {
             throw new Exception(__('Pas de réponse du démon.', __FILE__));
         }
+        if (!empty($reply['unknown'])) {
+            return false;
+        }
         if (empty($reply['ok'])) {
             throw new Exception(isset($reply['error']) ? (string) $reply['error'] : __('Échec de l\'ordre.', __FILE__));
         }
+        return true;
     }
 
     /* ==================================================== ÉCHECS ET ÉTAT */

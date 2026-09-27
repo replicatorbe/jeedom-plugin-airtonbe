@@ -104,6 +104,7 @@ const SILENCE_MAX     = 35;   /* sans aucune trame : connexion morte */
 const QUERY_EVERY     = 300;  /* relecture complète de sécurité */
 const ORDER_TIMEOUT   = 5;
 const STABLE_AFTER    = 60;
+const MAX_CLIENTS     = 32;
 
 /* ------------------------------------------------------------ JEEDOM */
 
@@ -113,8 +114,11 @@ function atCall($_query, $_body = null) {
     $ch = curl_init($url);
     $opts = array(
         CURLOPT_RETURNTRANSFER => true,
-        CURLOPT_CONNECTTIMEOUT => 5,
-        CURLOPT_TIMEOUT        => 20,
+        /* L'appel bloque la boucle : courts délais, pour que heartbeats et
+         * ordres n'attendent pas un Jeedom lent. Ce qui n'est pas passé est
+         * gardé et renvoyé. */
+        CURLOPT_CONNECTTIMEOUT => 2,
+        CURLOPT_TIMEOUT        => 5,
         CURLOPT_PROXY          => '',
         CURLOPT_SSL_VERIFYPEER => false,
         CURLOPT_SSL_VERIFYHOST => 0,
@@ -307,6 +311,7 @@ function atOpened(&$_c) {
     $_c['hbAt'] = $clock;
     $_c['queryAt'] = $clock;
     $_c['seq'] = 1;
+    $_c['gotState'] = false;
     atSend($_c, airtonbeTuya::DP_QUERY, airtonbeTuya::queryData($_c['devId']));
 }
 
@@ -326,16 +331,34 @@ function atRead(&$_c) {
             atLog('debug', $_c['name'] . ' : trame au CRC faux ignorée');
             continue;
         }
-        $data = airtonbeTuya::decode($f['payload'], $_c['key']);
-        if (is_string($data) && $data !== '' && $data[0] === '!') {
-            atClose($_c, 'réponse indéchiffrable, clé locale fausse ?');
-            return;
+        atLog('debug', $_c['name'] . ' : trame cmd=' . $f['cmd'] . ' seq=' . $f['seq'] . ' retcode=' . var_export($f['retcode'], true));
+        /* Un refus arrive souvent en clair : le retcode se lit avant de
+         * conclure à une clé fausse. */
+        $data = $f['retcode'] ? null : airtonbeTuya::decode($f['payload'], $_c['key']);
+        if (airtonbeTuya::unreadable($data)) {
+            if ($f['cmd'] === airtonbeTuya::DP_QUERY || $f['cmd'] === airtonbeTuya::STATUS) {
+                atClose($_c, 'réponse indéchiffrable, clé locale fausse ?');
+                return;
+            }
+            $data = null;
         }
+        atAlive($_c);
         atFrame($_c, $f, $data);
         if ($_c['state'] !== 'open') {
             return;
         }
     }
+}
+
+/* Toute trame lisible prouve la connexion : l'appareil repasse en ligne sans
+ * attendre la relecture complète. */
+function atAlive(&$_c) {
+    if ($_c['down'] || empty($_c['ever'])) {
+        atLog('info', 'Connexion à ' . $_c['name'] . ' établie');
+        atQueue($_c['eq'], array('online' => 1));
+    }
+    $_c['down'] = false;
+    $_c['ever'] = true;
 }
 
 function atFrame(&$_c, $_f, $_data) {
@@ -344,18 +367,13 @@ function atFrame(&$_c, $_f, $_data) {
     if ($cmd === airtonbeTuya::DP_QUERY && $dps !== null) {
         atLog('debug', $_c['name'] . ' : état complet ' . json_encode($dps));
         atQueue($_c['eq'], array('online' => 1, 'dps' => $dps, 'full' => true));
-        /* Une ligne à la première connexion et à chaque retour, pas une par
-         * relecture. */
-        if ($_c['down'] || empty($_c['ever'])) {
-            atLog('info', 'Connexion à ' . $_c['name'] . ' établie');
-        }
-        $_c['down'] = false;
-        $_c['ever'] = true;
+        $_c['gotState'] = true;
     } elseif (($cmd === airtonbeTuya::STATUS || $cmd === airtonbeTuya::UPDATEDPS) && $dps !== null) {
         atLog('debug', $_c['name'] . ' : changement ' . json_encode($dps));
         atQueue($_c['eq'], array('dps' => $dps));
-    } elseif ($cmd === airtonbeTuya::CONTROL) {
-        /* Accusé d'un ordre : même numéro de séquence que l'envoi. */
+    } elseif ($cmd === airtonbeTuya::CONTROL || $cmd === airtonbeTuya::CONTROL_NEW) {
+        /* Accusé d'un ordre : même numéro de séquence que l'envoi (vérifié
+         * sur un Airton 409730 ; le journal debug montre chaque trame). */
         if (isset($_c['pending'][$_f['seq']])) {
             $p = $_c['pending'][$_f['seq']];
             unset($_c['pending'][$_f['seq']]);
@@ -374,12 +392,12 @@ function atFrame(&$_c, $_f, $_data) {
 $clients = array();   /* [id] => array('sock', 'buf', 'since') */
 $clientSeq = 0;
 
-function atReply($_clientId, $_ok, $_error = '') {
+function atReply($_clientId, $_ok, $_error = '', $_extra = array()) {
     global $clients;
     if (!isset($clients[$_clientId])) {
         return;
     }
-    $reply = $_ok ? array('ok' => true) : array('ok' => false, 'error' => $_error);
+    $reply = ($_ok ? array('ok' => true) : array('ok' => false, 'error' => $_error)) + $_extra;
     @fwrite($clients[$_clientId]['sock'], json_encode($reply) . "\n");
     @fclose($clients[$_clientId]['sock']);
     unset($clients[$_clientId]);
@@ -392,9 +410,15 @@ function atRequest($_clientId, $_line) {
         atReply($_clientId, false, 'requête refusée');
         return;
     }
+    /* Lue trop tard (boucle retenue par un Jeedom lent) : Jeedom a déjà
+     * annoncé l'échec, l'ordre ne doit plus partir. */
+    if (isset($req['until']) && microtime(true) > (float) $req['until']) {
+        atReply($_clientId, false, 'démon occupé, ordre abandonné sans être envoyé');
+        return;
+    }
     $eq = isset($req['eq']) ? (int) $req['eq'] : 0;
     if (!isset($devices[$eq])) {
-        atReply($_clientId, false, 'climatiseur inconnu du démon (désactivé, ou configuration pas encore relue)');
+        atReply($_clientId, false, 'climatiseur inconnu du démon', array('unknown' => true));
         return;
     }
     $c = &$devices[$eq];
@@ -405,7 +429,11 @@ function atRequest($_clientId, $_line) {
     if (!empty($req['refresh'])) {
         $c['queryAt'] = atClock();
         atSend($c, airtonbeTuya::DP_QUERY, airtonbeTuya::queryData($c['devId']));
-        atReply($_clientId, true);
+        if ($c['state'] === 'open') {
+            atReply($_clientId, true);
+        } else {
+            atReply($_clientId, false, 'connexion à la clim perdue à l\'envoi');
+        }
         return;
     }
     if (!isset($req['dps']) || !is_array($req['dps']) || empty($req['dps'])) {
@@ -443,7 +471,9 @@ function atPoll($_timeout) {
                 $c['hbAt'] = $clock;
                 atSend($c, airtonbeTuya::HEART_BEAT, airtonbeTuya::heartbeatData($c['devId']));
             }
-            if ($c['state'] === 'open' && $clock - $c['queryAt'] >= QUERY_EVERY) {
+            /* Relecture complète périodique, ou redemandée si la première
+             * s'est perdue : sans elle, Jeedom n'a pas l'état de départ. */
+            if ($c['state'] === 'open' && $clock - $c['queryAt'] >= (empty($c['gotState']) ? 10 : QUERY_EVERY)) {
                 $c['queryAt'] = $clock;
                 atSend($c, airtonbeTuya::DP_QUERY, airtonbeTuya::queryData($c['devId']));
             }
@@ -458,12 +488,20 @@ function atPoll($_timeout) {
     }
     unset($c);
     foreach ($clients as $id => $cl) {
-        $read['c' . $id] = $cl['sock'];
+        /* Une requête par connexion : un client qui attend sa réponse
+         * n'est plus lu. */
+        if (empty($cl['waiting'])) {
+            $read['c' . $id] = $cl['sock'];
+        }
     }
     $r = array_values($read);
     $w = array_values($write);
     $e = null;
     $n = @stream_select($r, $w, $e, 0, (int) ($_timeout * 1000000));
+    if ($n === false) {
+        /* Interrompu par un signal : une courte pause évite la boucle à vide. */
+        usleep(50000);
+    }
     if ($n === false || $n === 0) {
         atExpire();
         return;
@@ -491,10 +529,18 @@ function atPoll($_timeout) {
         }
         if ($key === 'server') {
             $client = @stream_socket_accept($server, 0);
-            if ($client !== false) {
-                stream_set_blocking($client, false);
-                $clients[++$clientSeq] = array('sock' => $client, 'buf' => '', 'since' => atClock());
+            if ($client === false) {
+                continue;
             }
+            /* Plafond : au-delà, Jeedom est de toute façon en difficulté,
+             * et des descripteurs épuisés feraient tourner la boucle à vide. */
+            if (count($clients) >= MAX_CLIENTS) {
+                @fwrite($client, json_encode(array('ok' => false, 'error' => 'démon saturé')) . "\n");
+                @fclose($client);
+                continue;
+            }
+            stream_set_blocking($client, false);
+            $clients[++$clientSeq] = array('sock' => $client, 'buf' => '', 'since' => atClock());
             continue;
         }
         $id = (int) substr($key, 1);
@@ -574,35 +620,42 @@ $retryAt = -INF;
 atLog('info', 'Démarrage du démon Airton (PID ' . getmypid() . ', port local ' . $port . ')');
 
 while ($running) {
-    $clock = atClock();
-    /* Configuration relue quand le plugin le signale (fichier témoin), et de
-     * toute façon chaque minute. */
-    $content = ($stamp !== '' && is_readable($stamp)) ? @file_get_contents($stamp) : '';
-    if (($config === null || $content !== $stampSeen || $clock - $fetchedAt > 60) && $clock >= $retryAt) {
-        list($code, $body, $err) = atCall('action=config&connected=' . implode(',', atConnected()));
-        $fresh = $code === 200 ? json_decode((string) $body, true) : null;
-        if (is_array($fresh) && isset($fresh['devices']) && is_array($fresh['devices'])) {
-            if ($failures > 0) {
-                atLog('info', 'Jeedom de nouveau joignable');
-            }
-            if ($config === null || count($fresh['devices']) !== count($config['devices'])) {
-                atLog('info', count($fresh['devices']) . ' climatiseur(s) à suivre');
-            }
-            atSync($fresh['devices']);
-            $config = $fresh;
-            $stampSeen = $content;
-            $fetchedAt = $clock;
-            $failures = 0;
-        } else {
-            $failures++;
-            $retryAt = $clock + min(60, 5 * (1 << min(4, $failures - 1)));
-            if ($failures === 1) {
-                atLog('warning', 'Configuration illisible (HTTP ' . $code . ' ' . $err . '), nouvel essai en s\'espaçant');
+    /* Une erreur imprévue ne doit pas tuer le démon : elle est journalisée,
+     * et la boucle reprend après une courte pause. */
+    try {
+        $clock = atClock();
+        /* Configuration relue quand le plugin le signale (fichier témoin), et de
+         * toute façon chaque minute. */
+        $content = ($stamp !== '' && is_readable($stamp)) ? @file_get_contents($stamp) : '';
+        if (($config === null || $content !== $stampSeen || $clock - $fetchedAt > 60) && $clock >= $retryAt) {
+            list($code, $body, $err) = atCall('action=config&connected=' . implode(',', atConnected()));
+            $fresh = $code === 200 ? json_decode((string) $body, true) : null;
+            if (is_array($fresh) && isset($fresh['devices']) && is_array($fresh['devices'])) {
+                if ($failures > 0) {
+                    atLog('info', 'Jeedom de nouveau joignable');
+                }
+                if ($config === null || count($fresh['devices']) !== count($config['devices'])) {
+                    atLog('info', count($fresh['devices']) . ' climatiseur(s) à suivre');
+                }
+                atSync($fresh['devices']);
+                $config = $fresh;
+                $stampSeen = $content;
+                $fetchedAt = $clock;
+                $failures = 0;
+            } else {
+                $failures++;
+                $retryAt = $clock + min(60, 5 * (1 << min(4, $failures - 1)));
+                if ($failures === 1) {
+                    atLog('warning', 'Configuration illisible (HTTP ' . $code . ' ' . $err . '), nouvel essai en s\'espaçant');
+                }
             }
         }
+        atPoll(0.2);
+        atFlush();
+    } catch (Throwable $e) {
+        atLog('error', 'Erreur inattendue : ' . $e->getMessage() . ' (' . basename($e->getFile()) . ':' . $e->getLine() . ')');
+        usleep(500000);
     }
-    atPoll(0.2);
-    atFlush();
 }
 
 foreach ($devices as $eq => $c) {

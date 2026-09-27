@@ -1,7 +1,7 @@
 {
     "id": "airtonbe",
     "name": "Airton",
-    "pluginVersion": "0.1.0",
+    "pluginVersion": "0.2.0",
     "description": {
         "fr_FR": "Pilote en réseau local les climatiseurs Airton à module Wi-Fi (protocole Tuya 3.3), sans cloud ni compte. Le plugin trouve la clim sur le réseau, garde une connexion directe avec elle et reçoit aussitôt chaque changement, qu'il vienne de la télécommande, de l'appli ou de Jeedom. Commandes : marche, arrêt, consigne, température, mode (froid, chaud, déshumidification, ventilation, auto), ventilation de silence à turbo, balayages vertical, horizontal et 3D, ECO, nuit, affichage, santé, auto-nettoyage, hors-gel, minuterie, consommation et codes défaut décodés. Choisir un mode clim éteinte l'allume dans ce mode, en un seul ordre, comme l'exigent les Airton. Aucune dépendance à installer.",
         "en_US": "Drives Airton air conditioners with a Wi-Fi module (Tuya protocol 3.3) over the local network, with no cloud and no account. The plugin finds the unit on the network, keeps a direct connection to it and receives every change at once, whether it comes from the remote, the app or Jeedom. Commands: on, off, setpoint, temperature, mode (cool, heat, dry, fan, auto), fan speed from silent to turbo, vertical, horizontal and 3D swing, ECO, sleep, display, health, self-cleaning, frost protection, timer, energy and decoded fault codes. Choosing a mode while the unit is off turns it on in that mode with a single order, as Airton units require. Nothing to install."
@@ -10,7 +10,7 @@
     "author": "sMug (Jérôme Fafchamps)",
     "require": "4.4",
     "requireOsVersion": "11",
-    "category": "comfort",
+    "category": "wellness",
     "index": "airtonbe",
     "hasDependency": 0,
     "hasOwnDeamon": 1,
