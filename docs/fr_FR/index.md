@@ -90,10 +90,12 @@ pour les scénarios et l'historique.
 | Balayage vertical, Balayage horizontal | Positions fixes ou balayage. |
 | ECO, Nuit, Affichage, Balayage 3D, Santé (ioniseur), Auto-nettoyage, Hors-gel 8 °C, Chauffage d’appoint, Séchage anti-moisissure | Interrupteurs (« … On » / « … Off » et l'info d'état). |
 | Balayage, État balayage | Ancien réglage de balayage (DP 15), en doublon des deux précédents. |
-| Minuterie, État minuterie, Minuterie restante | Arrêt programmé, de 1 à 24 heures. |
+| Minuterie, État minuterie, Minuterie restante | Arrêt programmé, de 1 à 24 heures. Créées d'office sur un Airton : la clim ne signale la minuterie qu'à son changement. |
 | Consommation, Durée d’utilisation | Compteurs de la clim. |
 | Défaut, Codes défaut | Codes de panne décodés (E1, P0…), à rapprocher de la notice. |
 | Unité, Type | °C ou °F ; froid seul ou réversible, tel que la clim le déclare. En lecture seule. |
+| Mode (libellé), Ventilation (libellé)… | Le même état en clair (« Froid », « Turbo »), pour les notifications et l'historique. Cachées par défaut. |
+| Préréglages | Une commande par préréglage nommé, voir plus bas. |
 | En ligne | La clim répond. |
 | Rafraîchir | Relit tout l'état. |
 | Envoyer des DP | Envoi brut pour les scénarios, voir plus bas. |
@@ -125,6 +127,14 @@ clim, stable, et non le libellé affiché. Dans un scénario, on teste donc
 - **L'unité (°C / °F) n'est pas réglable depuis Jeedom** : en °F, la consigne
   changerait d'échelle. Laissez la clim en °C.
 
+### Préréglages
+
+Dans l'onglet **Équipement**, jusqu'à quatre préréglages : un nom, un mode,
+et au choix une consigne et une ventilation. Chacun devient une commande qui
+allume la clim dans ce réglage, en un seul ordre, par exemple « Froid 22 » ou
+« Chauffage nuit ». La consigne est ignorée en mode Ventilation. Effacer le nom
+retire la commande.
+
 ### Envoyer des DP
 
 La commande **Envoyer des DP** envoie un objet JSON de fonctions Tuya, tel
@@ -137,6 +147,13 @@ coup :
 
 Allume la clim en froid, consigne 22 °C (la valeur est multipliée par 10),
 ventilation auto. Les numéros et valeurs sont ceux de l'onglet **Diagnostic**.
+
+## Adresse IP changée
+
+Si la clim ne répond plus, le plugin écoute toutes les dix minutes les annonces
+du réseau. S'il la retrouve (par son identifiant) à une autre adresse, il
+corrige l'équipement tout seul et le note dans le journal. Réserver l'adresse
+dans le routeur reste le plus sûr.
 
 ## Diagnostic
 

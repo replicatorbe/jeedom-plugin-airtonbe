@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.3.0
+
+- Préréglages : jusqu'à quatre commandes « un clic » (mode, consigne,
+  ventilation), envoyées en une seule trame et allumant la clim.
+- Infos en clair (« Froid », « Turbo »…) à côté des valeurs brutes, pour les
+  notifications et l'historique.
+- Minuterie et mode effectif créés d'office sur les Airton, qui ne les
+  signalent qu'à leur changement.
+- Adresse IP corrigée toute seule quand la clim a changé d'adresse.
+
 ## 0.2.0
 
 Corrections après relecture complète.

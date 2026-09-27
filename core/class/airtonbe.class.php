@@ -78,18 +78,18 @@ class airtonbe extends eqLogic {
                      'generic' => 'THERMOSTAT_SETPOINT', 'set_generic' => 'THERMOSTAT_SET_SETPOINT', 'set' => 'Consigne'),
         4   => array('key' => 'mode', 'order' => 4, 'name' => 'État mode', 'type' => 'enum', 'write' => true, 'visible' => 1,
                      'values' => array('auto' => 'Auto', 'cold' => 'Froid', 'wet' => 'Déshumidification', 'heat' => 'Chauffage', 'fan' => 'Ventilation'),
-                     'generic' => 'THERMOSTAT_MODE', 'set_generic' => 'THERMOSTAT_SET_MODE', 'set' => 'Mode'),
+                     'generic' => 'THERMOSTAT_MODE', 'set_generic' => 'THERMOSTAT_SET_MODE', 'set' => 'Mode', 'label' => 'Mode (libellé)'),
         5   => array('key' => 'fan', 'order' => 5, 'name' => 'État ventilation', 'type' => 'enum', 'write' => true, 'visible' => 1,
                      'values' => array('auto' => 'Auto', 'mute' => 'Silence', 'low' => 'Basse', 'low_mid' => 'Moyenne-basse', 'mid' => 'Moyenne',
                                        'mid_high' => 'Moyenne-haute', 'high' => 'Haute', 'turbo' => 'Turbo'),
-                     'set' => 'Ventilation'),
+                     'set' => 'Ventilation', 'label' => 'Ventilation (libellé)'),
         107 => array('key' => 'swing_v', 'order' => 6, 'name' => 'État balayage vertical', 'type' => 'enum', 'write' => true, 'visible' => 1,
                      'values' => array('off' => 'Arrêt', '15' => 'Balayage', '1' => 'Position 1 (haut)', '2' => 'Position 2', '3' => 'Position 3',
                                        '4' => 'Position 4', '5' => 'Position 5 (bas)'),
-                     'set' => 'Balayage vertical'),
+                     'set' => 'Balayage vertical', 'label' => 'Balayage vertical (libellé)'),
         106 => array('key' => 'swing_h', 'order' => 7, 'name' => 'État balayage horizontal', 'type' => 'enum', 'write' => true, 'visible' => 1,
                      'values' => array('off' => 'Arrêt', 'same' => 'Même sens', 'opposite' => 'Sens opposés'),
-                     'set' => 'Balayage horizontal'),
+                     'set' => 'Balayage horizontal', 'label' => 'Balayage horizontal (libellé)'),
         8   => array('key' => 'eco', 'order' => 8, 'name' => 'ECO', 'type' => 'bool', 'write' => true, 'visible' => 1),
         109 => array('key' => 'sleep', 'order' => 9, 'name' => 'Nuit', 'type' => 'bool', 'write' => true, 'visible' => 1),
         13  => array('key' => 'display', 'order' => 10, 'name' => 'Affichage', 'type' => 'bool', 'write' => true, 'visible' => 1),
@@ -105,7 +105,8 @@ class airtonbe extends eqLogic {
         21  => array('key' => 'timer', 'order' => 18, 'name' => 'État minuterie', 'type' => 'enum', 'write' => true, 'values' => 'timer', 'set' => 'Minuterie'),
         22  => array('key' => 'timer_left', 'order' => 19, 'name' => 'Minuterie restante', 'type' => 'value', 'unit' => 'min'),
         114 => array('key' => 'current_mode', 'order' => 20, 'name' => 'Mode effectif', 'type' => 'enum',
-                     'values' => array('cold' => 'Froid', 'wet' => 'Déshumidification', 'heat' => 'Chauffage', 'fan' => 'Ventilation')),
+                     'values' => array('cold' => 'Froid', 'wet' => 'Déshumidification', 'heat' => 'Chauffage', 'fan' => 'Ventilation'),
+                     'label' => 'Mode effectif (libellé)'),
         20  => array('key' => 'fault', 'order' => 21, 'type' => 'bitmap',
                      'bits' => array('CL', 'E4', 'E5', 'H6', 'H9', 'HE', 'L0', 'L1', 'L2', 'L3', 'L6', 'L7', 'L8', 'L9', 'LA', 'Ld',
                                      'P0', 'P1', 'P6', 'P8', 'PA', 'PC', 'Pd', 'PE')),
@@ -124,6 +125,17 @@ class airtonbe extends eqLogic {
 
     /* DP dont les commandes existent avant le premier relevé. */
     const CORE_DPS = array(1, 2, 3, 4, 5);
+
+    /* Clé produit des Airton connus. */
+    const AIRTON_PRODUCTS = array('keyquxnsj75xc8se');
+
+    /* DP que les Airton ne remontent pas dans l'état complet, seulement à leur
+     * changement : sans eux d'office, minuterie et mode effectif n'auraient
+     * jamais de commande. */
+    const AIRTON_DPS = array(21, 114);
+
+    /* Préréglages : marche, mode, consigne et ventilation en une trame. */
+    const PRESETS = 4;
 
     /* ================================================================ CRON */
 
@@ -152,6 +164,59 @@ class airtonbe extends eqLogic {
                 $eqLogic->noteFailure($e->getMessage());
             }
         }
+    }
+
+    /*
+     * Toutes les dix minutes, si un climatiseur ne répond plus : écoute des
+     * annonces du réseau, pour corriger une adresse IP changée (DHCP). La clim
+     * est reconnue par son identifiant, qui ne change pas.
+     */
+    public static function cron10() {
+        $lost = array();
+        foreach (self::byType(__CLASS__, true) as $eqLogic) {
+            if ($eqLogic->isConfigured() && (int) $eqLogic->getCache('failures', 0) > 0 && !$eqLogic->isLive()) {
+                $lost[] = $eqLogic;
+            }
+        }
+        if (empty($lost)) {
+            return;
+        }
+        try {
+            $found = airtonbeTuya::discover(6);
+        } catch (Throwable $e) {
+            log::add(__CLASS__, 'debug', __('Recherche d\'adresse :', __FILE__) . ' ' . $e->getMessage());
+            return;
+        }
+        $known = array();
+        foreach ($lost as $eqLogic) {
+            $known[$eqLogic->getId()] = array('dev_id' => $eqLogic->getConfiguration('dev_id'), 'ip' => $eqLogic->getConfiguration('ip'));
+        }
+        foreach (self::relocations($found, $known) as $id => $ip) {
+            $eqLogic = self::byId($id);
+            if (!is_object($eqLogic)) {
+                continue;
+            }
+            log::add(__CLASS__, 'info', $eqLogic->getHumanName() . ' : ' . __('nouvelle adresse IP', __FILE__) . ' '
+                . $eqLogic->getConfiguration('ip') . ' → ' . $ip);
+            $eqLogic->setConfiguration('ip', $ip);
+            $eqLogic->save();
+        }
+    }
+
+    /* Adresses à corriger : [id => nouvelle IP], pour chaque équipement dont
+     * l'identifiant s'annonce ailleurs. */
+    public static function relocations($_found, $_known) {
+        $changes = array();
+        foreach ($_known as $id => $eq) {
+            if (!isset($_found[$eq['dev_id']]['ip'])) {
+                continue;
+            }
+            $ip = (string) $_found[$eq['dev_id']]['ip'];
+            if ($ip !== '' && $ip !== $eq['ip'] && filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4)) {
+                $changes[$id] = $ip;
+            }
+        }
+        return $changes;
     }
 
     public static function health() {
@@ -366,7 +431,7 @@ class airtonbe extends eqLogic {
                 'ip'         => isset($info['ip']) ? $info['ip'] : '',
                 'productKey' => isset($info['productKey']) ? $info['productKey'] : '',
                 'version'    => isset($info['version']) ? $info['version'] : '',
-                'airton'     => isset($info['productKey']) && $info['productKey'] === 'keyquxnsj75xc8se',
+                'airton'     => isset($info['productKey']) && in_array($info['productKey'], self::AIRTON_PRODUCTS, true),
                 'known'      => is_object($known) ? $known->getHumanName() : '',
                 'knownId'    => is_object($known) ? $known->getId() : '',
             );
@@ -530,6 +595,10 @@ class airtonbe extends eqLogic {
                     break;
                 case 'enum':
                     $values[$def['key']] = (string) $raw;
+                    if (isset($def['label'])) {
+                        $labels = self::enumValues($def);
+                        $values[$def['key'] . '_label'] = isset($labels[(string) $raw]) ? $labels[(string) $raw] : (string) $raw;
+                    }
                     break;
                 case 'bitmap':
                     $fault = true;
@@ -584,7 +653,7 @@ class airtonbe extends eqLogic {
      * s'applique. L'info reste disponible pour les scénarios et l'historique.
      */
     public function createCommands() {
-        $dps = array_unique(array_merge(self::CORE_DPS, $this->seenDps()));
+        $dps = array_unique(array_merge(self::CORE_DPS, $this->isAirton() ? self::AIRTON_DPS : array(), $this->seenDps()));
         $this->addCmdIfMissing('online', 'En ligne', 'info', 'binary', array('order' => 0));
         foreach ($dps as $dp) {
             if (!isset(self::PROFILE[$dp])) {
@@ -607,6 +676,9 @@ class airtonbe extends eqLogic {
                 'isHistorized' => isset($def['hist']) ? $def['hist'] : 0,
                 'unite' => isset($def['unit']) ? $def['unit'] : '', 'generic' => isset($def['generic']) ? $def['generic'] : '',
             ));
+            if (isset($def['label'])) {
+                $this->addCmdIfMissing($key . '_label', $def['label'], 'info', 'string', array('order' => $base + 5));
+            }
             if (!$writable) {
                 continue;
             }
@@ -633,9 +705,71 @@ class airtonbe extends eqLogic {
                     break;
             }
         }
+        $this->syncPresetCommands();
         $this->addCmdIfMissing('refresh', 'Rafraîchir', 'action', 'other', array('order' => 900, 'isVisible' => 1));
         $this->addCmdIfMissing('send_dps', 'Envoyer des DP', 'action', 'message', array('order' => 901,
             'display' => array('title_disable' => 1, 'message_placeholder' => '{"1":true,"4":"cold","2":220}')));
+    }
+
+    /* Airton reconnu par sa clé produit, ou, équipement saisi à la main, par
+     * le DP 112 (froid seul / réversible), propre à ces climatiseurs. */
+    public function isAirton() {
+        return in_array((string) $this->getConfiguration('product_key', ''), self::AIRTON_PRODUCTS, true)
+            || in_array(112, $this->seenDps(), true);
+    }
+
+    public function preset($_n) {
+        $preset = array();
+        foreach (array('name', 'mode', 'target', 'fan') as $field) {
+            $preset[$field] = trim((string) $this->getConfiguration('preset' . (int) $_n . '_' . $field, ''));
+        }
+        return $preset;
+    }
+
+    /* Une commande par préréglage nommé, renommée avec lui, retirée quand
+     * son nom est effacé. */
+    private function syncPresetCommands() {
+        for ($n = 1; $n <= self::PRESETS; $n++) {
+            $name = cleanComponanteName($this->preset($n)['name']);
+            $cmd = $this->getCmd('action', 'preset_' . $n);
+            if ($name === '' || $this->preset($n)['mode'] === '') {
+                if (is_object($cmd)) {
+                    $cmd->remove();
+                }
+                continue;
+            }
+            if (!is_object($cmd)) {
+                $this->addCmdIfMissing('preset_' . $n, $name, 'action', 'other', array('order' => 800 + $n, 'isVisible' => 1));
+                continue;
+            }
+            if ($cmd->getName() !== $name && !is_object(cmd::byEqLogicIdCmdName($this->getId(), $name))) {
+                $cmd->setName($name);
+                $cmd->save();
+            }
+        }
+    }
+
+    /*
+     * DP d'un préréglage : la clim est allumée, dans le mode, la consigne et
+     * la ventilation choisis, d'une seule trame. Consigne et ventilation sont
+     * facultatives ; la consigne n'a pas de sens en ventilation seule.
+     */
+    public static function presetDps($_preset) {
+        $modes = self::PROFILE[4]['values'];
+        if (!isset($_preset['mode']) || !array_key_exists($_preset['mode'], $modes)) {
+            throw new Exception(__('Préréglage sans mode valide.', __FILE__));
+        }
+        $dps = array('1' => true, '4' => $_preset['mode']);
+        if (isset($_preset['target']) && is_numeric($_preset['target']) && $_preset['mode'] !== 'fan') {
+            $dps['2'] = max(self::TARGET_MIN, min(self::TARGET_MAX, (int) round((float) $_preset['target']))) * 10;
+        }
+        if (!empty($_preset['fan'])) {
+            if (!array_key_exists($_preset['fan'], self::PROFILE[5]['values'])) {
+                throw new Exception(__('Préréglage : ventilation inconnue', __FILE__) . ' ' . $_preset['fan']);
+            }
+            $dps['5'] = $_preset['fan'];
+        }
+        return $dps;
     }
 
     private function addCmdIfMissing($_logicalId, $_name, $_type, $_subType, $_options = array()) {
@@ -709,6 +843,10 @@ class airtonbe extends eqLogic {
     public function runAction($_logicalId, $_options) {
         if ($_logicalId === 'refresh') {
             $this->pollNow();
+            return;
+        }
+        if (preg_match('/^preset_(\d+)$/', $_logicalId, $m)) {
+            $this->sendDps(self::presetDps($this->preset((int) $m[1])));
             return;
         }
         $dps = self::dpsForAction($_logicalId, $_options, (array) $this->getCache('dps', array()));

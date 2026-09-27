@@ -165,7 +165,8 @@ check('avant le premier relevé : commandes de base', $eq->getCmd('action', 'mod
 $eq->ingest($state, true);
 check('après relevé : DP publiés mémorisés', $eq->getConfiguration('dps_seen'), '1,2,3,4,5,8,9,12,13,15,20,22,101,102,105,106,107,108,109,110,111,112,113,115');
 check('après relevé : ECO créé', $eq->getCmd('action', 'eco_on') !== null, true);
-check('après relevé : pas de minuterie réglable (DP 21 absent)', $eq->getCmd('action', 'timer_set'), null);
+check('Airton reconnu au DP 112 : minuterie créée d\'office', $eq->getCmd('action', 'timer_set') !== null, true);
+check('Airton : mode effectif créé d\'office', $eq->getCmd('info', 'current_mode') !== null, true);
 check('valeur publiée : consigne', $eq->published['target'], 16.0);
 check('valeur publiée : défaut', $eq->published['fault'], 0);
 $sel = $eq->getCmd('action', 'mode_set');
@@ -179,7 +180,7 @@ $eq->ingest(array('1' => true));
 check('changement poussé : état fusionné', $eq->getCache('dps')['1'] === true && $eq->getCache('dps')['2'] === 160, true);
 check('changement poussé : publié', $eq->published['power'], 1);
 $eq->ingest(array('21' => '3'));
-check('DP apparu plus tard : commande créée', $eq->getCmd('action', 'timer_set') !== null, true);
+check('DP 21 poussé : état publié', $eq->published['timer'], '3');
 $eq->ingest($state, true);
 check('relevé complet : DP 21 (poussé seulement) gardé', $eq->getCache('dps')['21'], '3');
 
@@ -196,6 +197,40 @@ check('info d\'une valeur réglable cachée', $eq->getCmd('info', 'target')->isV
 check('ordre fixe : minuterie après les interrupteurs', $eq->getCmd('info', 'timer')->order > $eq->getCmd('action', 'display_off')->order, true);
 check('unité en lecture seule', $eq->getCmd('action', 'unit_set'), null);
 check('apostrophe gardée dans les noms', $eq->getCmd('info', 'aux_heat')->name, 'Chauffage d’appoint');
+
+section('Libellés');
+$v = airtonbe::valuesFromDps(array('4' => 'wet', '5' => 'mid_high', '107' => '15', '114' => 'heat'));
+check('mode en clair', $v['mode_label'], 'Déshumidification');
+check('ventilation en clair', $v['fan_label'], 'Moyenne-haute');
+check('balayage vertical en clair (clé numérique)', $v['swing_v_label'], 'Balayage');
+check('mode effectif en clair', $v['current_mode_label'], 'Chauffage');
+check('valeur inconnue gardée brute', airtonbe::valuesFromDps(array('4' => 'hot'))['mode_label'], 'hot');
+check('info libellé créée, cachée', $eq->getCmd('info', 'mode_label') !== null && $eq->getCmd('info', 'mode_label')->isVisible === 0, true);
+$eq->ingest(array('4' => 'heat'));
+check('libellé publié au changement', $eq->published['mode_label'], 'Chauffage');
+
+section('Préréglages');
+check('froid 22, auto', airtonbe::presetDps(array('mode' => 'cold', 'target' => '22', 'fan' => 'auto')), array('1' => true, '4' => 'cold', '2' => 220, '5' => 'auto'));
+check('consigne et ventilation facultatives', airtonbe::presetDps(array('mode' => 'heat', 'target' => '', 'fan' => '')), array('1' => true, '4' => 'heat'));
+check('pas de consigne en ventilation seule', airtonbe::presetDps(array('mode' => 'fan', 'target' => '25', 'fan' => 'low')), array('1' => true, '4' => 'fan', '5' => 'low'));
+check('consigne bornée', airtonbe::presetDps(array('mode' => 'cold', 'target' => '12'))['2'], 160);
+throws('mode manquant refusé', function () { airtonbe::presetDps(array('mode' => '')); }, 'mode');
+throws('ventilation inconnue refusée', function () { airtonbe::presetDps(array('mode' => 'cold', 'fan' => 'max')); }, 'max');
+$eq->setConfiguration('preset1_name', 'Froid 22');
+$eq->setConfiguration('preset1_mode', 'cold');
+$eq->setConfiguration('preset2_name', 'Sans mode');
+$eq->createCommands();
+check('préréglage nommé : commande créée, visible', $eq->getCmd('action', 'preset_1') !== null && $eq->getCmd('action', 'preset_1')->isVisible === 1, true);
+check('préréglage sans mode : pas de commande', $eq->getCmd('action', 'preset_2'), null);
+$eq->setConfiguration('preset1_name', 'Fraîcheur');
+$eq->createCommands();
+check('préréglage renommé', $eq->getCmd('action', 'preset_1')->name, 'Fraîcheur');
+
+section('Adresse IP changée');
+$found = array('bfA' => array('ip' => '192.168.0.77'), 'bfB' => array('ip' => '192.168.0.20'), 'bfC' => array('ip' => 'nimporte'));
+$known = array(5 => array('dev_id' => 'bfA', 'ip' => '192.168.0.50'), 6 => array('dev_id' => 'bfB', 'ip' => '192.168.0.20'),
+               7 => array('dev_id' => 'bfC', 'ip' => '192.168.0.9'), 8 => array('dev_id' => 'bfZ', 'ip' => '192.168.0.8'));
+check('seule l\'adresse réellement changée est corrigée', airtonbe::relocations($found, $known), array(5 => '192.168.0.77'));
 
 section('Événements');
 $before = $eq->events;

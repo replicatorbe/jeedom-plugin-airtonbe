@@ -138,6 +138,32 @@ $eqLogics = eqLogic::byType($plugin->getId());
 									<input type="checkbox" class="eqLogicAttr" data-l1key="isVisible" checked>
 								</div>
 							</div>
+
+							<legend><i class="fas fa-magic"></i> {{Préréglages}}</legend>
+							<span class="help-block">{{Chaque préréglage nommé devient une commande qui allume la clim dans ce mode, avec cette consigne et cette ventilation, en un seul ordre. Consigne et ventilation sont facultatives ; effacez le nom pour retirer la commande.}}</span>
+							<?php
+							$modes = airtonbe::PROFILE[4]['values'];
+							$fans = airtonbe::PROFILE[5]['values'];
+							for ($n = 1; $n <= airtonbe::PRESETS; $n++) {
+								echo '<div class="form-group">';
+								echo '<label class="col-sm-3 control-label">{{Préréglage}} ' . $n . '</label>';
+								echo '<div class="col-sm-3"><input type="text" class="eqLogicAttr form-control input-sm" data-l1key="configuration" data-l2key="preset' . $n . '_name" placeholder="' . ($n == 1 ? '{{Froid 22}}' : '{{Nom}}') . '"></div>';
+								echo '<div class="col-sm-2"><select class="eqLogicAttr form-control input-sm" data-l1key="configuration" data-l2key="preset' . $n . '_mode">';
+								echo '<option value="">{{Mode}}</option>';
+								foreach ($modes as $value => $label) {
+									echo '<option value="' . $value . '">' . $label . '</option>';
+								}
+								echo '</select></div>';
+								echo '<div class="col-sm-2"><input type="number" class="eqLogicAttr form-control input-sm" data-l1key="configuration" data-l2key="preset' . $n . '_target" min="' . airtonbe::TARGET_MIN . '" max="' . airtonbe::TARGET_MAX . '" placeholder="°C"></div>';
+								echo '<div class="col-sm-2"><select class="eqLogicAttr form-control input-sm" data-l1key="configuration" data-l2key="preset' . $n . '_fan">';
+								echo '<option value="">{{Ventilation}}</option>';
+								foreach ($fans as $value => $label) {
+									echo '<option value="' . $value . '">' . $label . '</option>';
+								}
+								echo '</select></div>';
+								echo '</div>';
+							}
+							?>
 						</fieldset>
 					</form>
 				</div>

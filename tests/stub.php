@@ -77,6 +77,7 @@ class cmd {
     public function setDisplay($_k, $_v) { $this->display[$_k] = $_v; return $this; }
     public function setTemplate($_k, $_v) { $this->template[$_k] = $_v; return $this; }
     public function execCmd() { return $this->current; }
+    public function remove() { unset(self::$table[$this->id]); }
 
     /* La contrainte d'unicité (eqLogic_id, name) de la vraie table est
      * reproduite : un doublon lève, comme DB::save() le ferait. */
